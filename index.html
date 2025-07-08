@@ -38,7 +38,7 @@
   <section class="container">
     <label class="upload-label" for="fileInput">
       사진 올리기 📷
-      <input type="file" id="fileInput" accept="image/*" capture="environment">
+      <input type="file" id="fileInput" accept="image/*">
     </label>
     <div class="controls">
       <select id="pieceCount" class="dropdown">
@@ -86,6 +86,140 @@
       return {rows:2, cols:2};
     }
 
+    // 이미지를 정사각형으로 crop(크기 상관없이 300x300으로 변환)
+    function cropAndResizeImage(file, callback) {
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const img = new Image();
+        img.onload = function() {
+          // 정사각형 crop
+          const canvas = document.createElement('canvas');
+          canvas.width = 300; canvas.height = 300;
+          const ctx = canvas.getContext('2d');
+          let srcW = img.width, srcH = img.height;
+          let srcSize = Math.min(srcW, srcH);
+          let sx = (srcW - srcSize) / 2;
+          let sy = (srcH - srcSize) / 2;
+          ctx.drawImage(img, sx, sy, srcSize, srcSize, 0, 0, 300, 300);
+          const outImg = new Image();
+          outImg.onload = () => callback(outImg);
+          outImg.src = canvas.toDataURL("image/jpeg", 0.85);
+        };
+        img.onerror = () => alert("이미지 파일을 불러올 수 없습니다.");
+        img.src = evt.target.result;
+      };
+      reader.onerror = () => alert("이미지 파일을 읽을 수 없습니다.");
+      reader.readAsDataURL(file);
+    }
+
+    // 퍼즐판 생성 (기존과 동일)
+    function resetGame(img) {
+      completeMsg.style.display = "none";
+      if(!img) img = originalImage || (() => {
+        const i = new Image(); i.src = sampleImgUrl;
+        i.onload = ()=>resetGame(i); return i;
+      })();
+      if(!img.complete) { img.onload = ()=>resetGame(img); return; }
+      pieceCount = parseInt(pieceCountSel.value,10);
+      let rc = getRowsCols(pieceCount); rows=rc.rows; cols=rc.cols;
+      pieces = [];
+      puzzleBoard.innerHTML = '';
+      pieceTray.innerHTML = '';
+      puzzleBoard.style.width = "300px"; puzzleBoard.style.height = "300px";
+      pieceWidth = 300/cols;
+      pieceHeight = 300/rows;
+      if(pieceCount <= 3) {
+        for(let i=0;i<pieceCount;i++) {
+          let r = 0, c = i;
+          let slot = document.createElement('div');
+          slot.className = "puzzle-slot";
+          slot.style.left = (c*pieceWidth)+"px";
+          slot.style.top = (r*pieceHeight)+"px";
+          slot.style.width = pieceWidth+'px';
+          slot.style.height = pieceHeight+'px';
+          slot.dataset.idx = i;
+          slot.style.position = "absolute";
+          puzzleBoard.appendChild(slot);
+        }
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 300; tempCanvas.height = 300;
+        tempCanvas.getContext('2d').drawImage(img, 0, 0, 300, 300);
+        for (let i=0; i<pieceCount; i++) {
+          let c = i%cols, r = 0;
+          const pieceCanvas = document.createElement('canvas');
+          pieceCanvas.width = pieceWidth; pieceCanvas.height = pieceHeight;
+          pieceCanvas.getContext('2d').drawImage(
+            tempCanvas,
+            c*pieceWidth, r*pieceHeight, pieceWidth, pieceHeight,
+            0, 0, pieceWidth, pieceHeight
+          );
+          pieceCanvas.className = "puzzle-piece";
+          pieceCanvas.dataset.idx = i;
+          pieceCanvas.style.position = "absolute";
+          pieceCanvas.style.left = Math.random()*160+30+"px";
+          pieceCanvas.style.top = (i*30+Math.random()*40+330)+"px";
+          pieceCanvas.width = pieceWidth;
+          pieceCanvas.height = pieceHeight;
+          pieces.push({
+            idx:i,
+            el:pieceCanvas,
+            correctX: c*pieceWidth, correctY: r*pieceHeight,
+          });
+        }
+        shuffle(pieces);
+        pieces.forEach(p=>{
+          puzzleBoard.appendChild(p.el);
+          addDragDropSimple(p.el, p);
+        });
+      } else {
+        const masks = buildPieceMasks(rows, cols);
+        for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) {
+          let i = r*cols+c;
+          let mask = masks[i];
+          const canvas = document.createElement('canvas');
+          canvas.width = pieceWidth; canvas.height = pieceHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.save();
+          let path2d = new Path2D(svgPathToCanvasPath(generatePuzzleShape(r,c,rows,cols,pieceWidth,pieceHeight,mask)));
+          ctx.clip(path2d);
+          ctx.drawImage(img, c*pieceWidth, r*pieceHeight, pieceWidth, pieceHeight, 0, 0, pieceWidth, pieceHeight);
+          ctx.restore();
+          canvas.dataset.mask = JSON.stringify(mask);
+          canvas.dataset.idx = i;
+          canvas.dataset.pos = `${r}-${c}`;
+          canvas.className = "puzzle-piece";
+          canvas.style.left = Math.random()*160+30+"px";
+          canvas.style.top = (i*30+Math.random()*40+330)+"px";
+          canvas.width = pieceWidth;
+          canvas.height = pieceHeight;
+          pieces.push({
+            idx:i,
+            row:r, col:c,
+            mask:mask,
+            el:canvas,
+            correctX: c*pieceWidth, correctY: r*pieceHeight,
+          });
+        }
+        for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) {
+          const slot = document.createElement('div');
+          slot.className = "puzzle-slot";
+          slot.style.left = (c*pieceWidth)+"px";
+          slot.style.top = (r*pieceHeight)+"px";
+          slot.style.width = pieceWidth+"px";
+          slot.style.height = pieceHeight+"px";
+          slot.dataset.pos = `${r}-${c}`;
+          slot.style.position = "absolute";
+          puzzleBoard.appendChild(slot);
+        }
+        shuffle(pieces);
+        pieces.forEach(p=>{
+          puzzleBoard.appendChild(p.el);
+          addDragDropCurve(p.el, p);
+        });
+      }
+    }
+
+    // 곡선형 퍼즐 조각 경계 등 관련 함수는 위 코드와 동일 (생략)
     function generatePuzzleShape(row, col, rows, cols, width, height, maskInfo) {
       let path = "";
       const s = 18;
@@ -106,13 +240,11 @@
       if(side==="top" || side==="bottom") {
         let cy = (side==="top"? -1 : 1) * s * sign;
         let baseY = (side==="top"? 0 : y);
-        let dir = (side==="top"? 1 : -1) * sign;
         return `C ${len*0.35} ${baseY}, ${len*0.35} ${baseY+cy}, ${len*0.5} ${baseY+cy}
                 C ${len*0.65} ${baseY+cy}, ${len*0.65} ${baseY}, ${len} ${baseY}`;
       } else {
         let cx = (side==="right"? 1 : -1) * s * sign;
         let baseX = (side==="right"? x+len : 0);
-        let dir = (side==="right"? -1 : 1) * sign;
         return `C ${baseX} ${len*0.35}, ${baseX+cx} ${len*0.35}, ${baseX+cx} ${len*0.5}
                 C ${baseX+cx} ${len*0.65}, ${baseX} ${len*0.65}, ${baseX} ${len}`;
       }
@@ -131,130 +263,10 @@
       }
       return masks;
     }
-
-    // 이미지를 정사각형으로 크롭 후, 로딩 보장
-    function cropImageToSquare(img, size, callback) {
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = size;
-      tempCanvas.height = size;
-      const ctx = tempCanvas.getContext('2d');
-      let srcSize = Math.min(img.width, img.height);
-      let sx = (img.width - srcSize) / 2;
-      let sy = (img.height - srcSize) / 2;
-      ctx.drawImage(img, sx, sy, srcSize, srcSize, 0, 0, size, size);
-      const croppedImg = new Image();
-      croppedImg.onload = () => callback(croppedImg);
-      croppedImg.src = tempCanvas.toDataURL("image/png");
+    function svgPathToCanvasPath(svgPath){
+      return svgPath.replace(/C/g, 'c').replace(/L/g, 'l').replace(/M/g, 'm').replace(/Z/g, 'z');
     }
-
-    function resetGame(img) {
-      completeMsg.style.display = "none";
-      if(!img) img = originalImage || (() => {
-        const i = new Image(); i.src = sampleImgUrl;
-        i.onload = ()=>resetGame(i); return i;
-      })();
-      if(!img.complete) { img.onload = ()=>resetGame(img); return; }
-      cropImageToSquare(img, 300, function(croppedImg) {
-        pieceCount = parseInt(pieceCountSel.value,10);
-        let rc = getRowsCols(pieceCount); rows=rc.rows; cols=rc.cols;
-        pieces = [];
-        puzzleBoard.innerHTML = '';
-        pieceTray.innerHTML = '';
-        puzzleBoard.style.width = "300px"; puzzleBoard.style.height = "300px";
-        pieceWidth = 300/cols;
-        pieceHeight = 300/rows;
-        if(pieceCount <= 3) {
-          for(let i=0;i<pieceCount;i++) {
-            let r = 0, c = i;
-            let slot = document.createElement('div');
-            slot.className = "puzzle-slot";
-            slot.style.left = (c*pieceWidth)+"px";
-            slot.style.top = (r*pieceHeight)+"px";
-            slot.style.width = pieceWidth+'px';
-            slot.style.height = pieceHeight+'px';
-            slot.dataset.idx = i;
-            slot.style.position = "absolute";
-            puzzleBoard.appendChild(slot);
-          }
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = 300; tempCanvas.height = 300;
-          tempCanvas.getContext('2d').drawImage(croppedImg, 0, 0, 300, 300);
-          for (let i=0; i<pieceCount; i++) {
-            let c = i%cols, r = 0;
-            const pieceCanvas = document.createElement('canvas');
-            pieceCanvas.width = pieceWidth; pieceCanvas.height = pieceHeight;
-            pieceCanvas.getContext('2d').drawImage(
-              tempCanvas,
-              c*pieceWidth, r*pieceHeight, pieceWidth, pieceHeight,
-              0, 0, pieceWidth, pieceHeight
-            );
-            pieceCanvas.className = "puzzle-piece";
-            pieceCanvas.dataset.idx = i;
-            pieceCanvas.style.position = "absolute";
-            pieceCanvas.style.left = Math.random()*160+30+"px";
-            pieceCanvas.style.top = (i*30+Math.random()*40+330)+"px";
-            pieceCanvas.width = pieceWidth;
-            pieceCanvas.height = pieceHeight;
-            pieces.push({
-              idx:i,
-              el:pieceCanvas,
-              correctX: c*pieceWidth, correctY: r*pieceHeight,
-            });
-          }
-          shuffle(pieces);
-          pieces.forEach(p=>{
-            puzzleBoard.appendChild(p.el);
-            addDragDropSimple(p.el, p);
-          });
-        } else {
-          const masks = buildPieceMasks(rows, cols);
-          for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) {
-            let i = r*cols+c;
-            let mask = masks[i];
-            const canvas = document.createElement('canvas');
-            canvas.width = pieceWidth; canvas.height = pieceHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.save();
-            let path2d = new Path2D(svgPathToCanvasPath(generatePuzzleShape(r,c,rows,cols,pieceWidth,pieceHeight,mask)));
-            ctx.clip(path2d);
-            ctx.drawImage(croppedImg, c*pieceWidth, r*pieceHeight, pieceWidth, pieceHeight, 0, 0, pieceWidth, pieceHeight);
-            ctx.restore();
-            canvas.dataset.mask = JSON.stringify(mask);
-            canvas.dataset.idx = i;
-            canvas.dataset.pos = `${r}-${c}`;
-            canvas.className = "puzzle-piece";
-            canvas.style.left = Math.random()*160+30+"px";
-            canvas.style.top = (i*30+Math.random()*40+330)+"px";
-            canvas.width = pieceWidth;
-            canvas.height = pieceHeight;
-            pieces.push({
-              idx:i,
-              row:r, col:c,
-              mask:mask,
-              el:canvas,
-              correctX: c*pieceWidth, correctY: r*pieceHeight,
-            });
-          }
-          for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) {
-            const slot = document.createElement('div');
-            slot.className = "puzzle-slot";
-            slot.style.left = (c*pieceWidth)+"px";
-            slot.style.top = (r*pieceHeight)+"px";
-            slot.style.width = pieceWidth+"px";
-            slot.style.height = pieceHeight+"px";
-            slot.dataset.pos = `${r}-${c}`;
-            slot.style.position = "absolute";
-            puzzleBoard.appendChild(slot);
-          }
-          shuffle(pieces);
-          pieces.forEach(p=>{
-            puzzleBoard.appendChild(p.el);
-            addDragDropCurve(p.el, p);
-          });
-        }
-      });
-    }
-
+    // 드래그/드롭 등 아래 함수는 기존과 동일(생략)
     function addDragDropSimple(pieceEl, pinfo) {
       pieceEl.onmousedown = (e) => {
         startDrag(pieceEl, pinfo, e.clientX, e.clientY);
@@ -385,7 +397,6 @@
       dragData.offsetY = y - el.getBoundingClientRect().top;
       el.style.zIndex = 99;
     }
-
     function checkSuccess() {
       let complete = true;
       if(pieceCount <= 3) {
@@ -404,14 +415,12 @@
         setTimeout(()=>completeMsg.style.display="none", 3200);
       }
     }
-
     function shuffle(arr) {
       for(let i=arr.length-1;i>0;i--) {
         const j = Math.floor(Math.random()*(i+1));
         [arr[i],arr[j]]=[arr[j],arr[i]];
       }
     }
-
     hintBtn.onclick = ()=>{
       showHint();
     };
@@ -429,21 +438,14 @@
       },1500);
     }
 
-    // 업로드된 사진으로 원본 교체
+    // ★★★ 파일 업로드 처리: 대용량/모든 이미지 정상 표시! ★★★
     document.getElementById('fileInput').addEventListener('change', (e)=>{
       const file = e.target.files[0];
       if(!file) return;
-      const reader = new FileReader();
-      reader.onload = function(evt){
-        const img = new Image();
-        img.onload = ()=> {
-          originalImage = img;
-          resetGame(img);
-        };
-        img.onerror = ()=>alert("이미지 로드 오류! 다른 파일을 사용해보세요.");
-        img.src = evt.target.result;
-      };
-      reader.readAsDataURL(file);
+      cropAndResizeImage(file, function(outImg){
+        originalImage = outImg;
+        resetGame(outImg);
+      });
     });
 
     pieceCountSel.addEventListener('change', (e)=>{
@@ -462,10 +464,6 @@
         originalImage = img;
         resetGame(img);
       }
-    }
-
-    function svgPathToCanvasPath(svgPath){
-      return svgPath.replace(/C/g, 'c').replace(/L/g, 'l').replace(/M/g, 'm').replace(/Z/g, 'z');
     }
   </script>
 </body>
